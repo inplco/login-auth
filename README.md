@@ -1,3 +1,3 @@
 # Getting started
 
-### Basic [Node.js](https://nodejs.org/en/) authentication back-end 
+Basic [Node.js](https://nodejs.org/en/) authentication back-end 
