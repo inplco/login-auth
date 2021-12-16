@@ -13,16 +13,17 @@ app.use(cors());
 
 const PORT = process.env.PORT || 8080;
 
+function writeLog() {
+  var util = require('util');
+  var log_file = fs.createWriteStream('./logs/debug.log', {flags : 'w'});
+  var log_stdout = process.stdout;
 
-var util = require('util');
-var log_file = fs.createWriteStream('./debug.log', {flags : 'w'});
-var log_stdout = process.stdout;
-
-console.log = function(d) { //
-  log_file.write(util.format(d) + '\n');
-  log_stdout.write(util.format(d) + '\n');
-};
-
+  console.log = function(d) { //
+    log_file.write(util.format(d) + '\n');
+    log_stdout.write(util.format(d) + '\n');
+  };
+}
+writeLog();
 
 const realTimeAuth = (tokenParams, response) => {
   realtime.auth.createTokenRequest(tokenParams, function (err, tokenRequest) {
@@ -63,6 +64,31 @@ function findAndReplace(object, value, replacevalue){
   }
 }
 
+// Find vote count
+function findIt(object, value){
+  for(var x in object){
+    if(object["value"] == value){
+      foundVote = object["votes"];
+    } else {
+      foundVote = 0;
+    }
+  }
+  return foundVote;
+}
+
+function getTopN(arr, prop, n) {
+    // clone before sorting, to preserve the original array
+    var clone = arr.slice(0);
+    // sort descending
+    clone.sort(function(x, y) {
+        if (x[prop] == y[prop]) return 0;
+        else if (parseInt(x[prop]) < parseInt(y[prop])) return 1;
+        else return -1;
+    });
+
+    return clone.slice(0, n || 1);
+}
+
 // A random key for signing the cookie
 var key = crypto.randomBytes(20).toString('hex');
 app.use(cookieParser(key));
@@ -77,7 +103,6 @@ app.get('/state', (req, res) => {
 var obj = [];
 
 app.get('/authenticate', (req, res, next) => {
-  console.log("authenticate");
   const options = {
     httpOnly: true,
     signed: true,
@@ -85,12 +110,12 @@ app.get('/authenticate', (req, res, next) => {
   };
 
   fs.readFile('./hasvoted.json', 'utf8', function read(err, data){
+    console.log("USER CALL BEGIN -----------------------");
+    console.log("authenticating user " + req.query.password);
     if (err){
       console.log('cannot read purged list');
     } else {
       const voted = data;
-      console.log('voted users: ', voted);
-      console.log('voter token: ', req.query.password);
       if (tokens.includes(req.query.password)) {
         console.log('user ' + req.query.password + ' exists');
         if (voted.includes(req.query.password)) {
@@ -101,50 +126,85 @@ app.get('/authenticate', (req, res, next) => {
           res.cookie('name', req.query.password, options).send({ type: 'user' });
         }
       } else {
-        console.log('fake user');
+        console.log('fake user token ' + req.query.password);
         res.send({ type: 'auth' });
       }
     }
+    console.log("USER CALL END -------------------------");
   });
 });
 
 app.get('/read-cookie', (req, res) => {
-  console.log("read-cookie ", String(req.signedCookies.name));
+  console.log("READ COOKIE BEGIN ---------------------");
+  console.log("read-cookie " + req.signedCookies.name);
   if (tokens.includes(req.signedCookies.name)) {
-    res.send({ type: 'user' });
+    var hasVoted = JSON.parse(fs.readFileSync('./hasvoted.json', 'utf8'));
+    if (hasVoted.includes(req.signedCookies.name)) {
+      res.send({ type: 'auth' });
+    }
   } else {
     res.send({ type: 'auth' });
   }
+  console.log("READ COOKIE END -----------------------");
 });
 
 app.get('/clear-cookie', (req, res) => {
-  console.log("clear-cookie ", String(req.signedCookies.name));
-  res.clearCookie('name').end('clearCookie');
+  console.log("CLEAR COOKIE BEGIN --------------------");
+  console.log("clear-cookie " + req.signedCookies.name);
+  res.clearCookie(req.signedCookies.name).end('clearCookie');
+  console.log("CLEAR COOKIE END ----------------------");
 });
 
 app.get('/read-vote', (req, res, next) => {
-  var posterName = req.query.name;
-  var voteCount = req.query.vote;
-  console.log("read-vote: ", String(posterName), String(voteCount));
-  var allVotedPosters = require('./voteCount.json');
-  findAndReplace(allVotedPosters, posterName, voteCount);
-  var json = JSON.stringify(allVotedPosters);
-  fd = fs.openSync('./voteCount.json', 'w');
-  fs.writeFileSync(fd, json);
-  fs.close(fd);
-  res.end('read-vote');
-});
-
-app.get('/sign-vote', (req, res) => {
-  console.log("purging user", String(req.signedCookies.name));
+  console.log("REGISTER VOTE BEGIN -------------------");
+  var stateVoted = JSON.parse(fs.readFileSync('./hasvoted.json', 'utf8'));
+  if (stateVoted.includes(req.signedCookies.name)) {
+    res.send({ type: 'auth' });
+  } else {
+    var allVotedPosters = JSON.parse(fs.readFileSync('./voteCount.json', 'utf8'));
+    var posterName = req.query.name;
+    var voteCount = req.query.vote;
+    var oldVote = findIt(allVotedPosters, posterName);
+    console.log(oldVote);
+    var updatedCount = oldVote + voteCount;
+    console.log(updatedCount);
+    console.log("read-vote: " + posterName + " (" + voteCount + ")");
+    findAndReplace(allVotedPosters, posterName, updatedCount);
+    var json = JSON.stringify(allVotedPosters);
+    fd = fs.openSync('./voteCount.json', 'w');
+    fs.writeFileSync(fd, json);
+    fs.close(fd);
+    var topScorers = getTopN(allVotedPosters, "votes", 10);
+    topScorers.forEach(function(item, index) {
+      console.log("Top#" + (index + 1) + ": " + item.name + "(" + item.votes + ")");
+    });
+  }
+  console.log("REGISTER VOTE END ---------------------");
+  console.log("PURGE TOKEN BEGIN ---------------------");
+  console.log("purging user " + req.signedCookies.name);
   var obj = JSON.parse(fs.readFileSync('./hasvoted.json', 'utf8'));
   obj.push({user: req.signedCookies.name});
   var json = JSON.stringify(obj);
   fd = fs.openSync('./hasvoted.json', 'w');
   fs.writeFileSync(fd, json);
   fs.close(fd);
-  console.log("purgeUser ", String(req.signedCookies.name));
-  res.clearCookie('name').end('purgeUser');
+  console.log("purgeUser " + req.signedCookies.name);
+  res.clearCookie(req.signedCookies.name).end('purgeUser');
+  console.log("PURGE TOKEN END -----------------------");
+});
+
+app.get('/sign-vote', (req, res) => {
+  console.log("PURGE TOKEN BEGIN ---------------------");
+  console.log("purging user " + req.signedCookies.name);
+  var obj = JSON.parse(fs.readFileSync('./hasvoted.json', 'utf8'));
+  obj.push({user: req.signedCookies.name});
+  var json = JSON.stringify(obj);
+  fd = fs.openSync('./hasvoted.json', 'w');
+  fs.writeFileSync(fd, json);
+  fs.close(fd);
+  console.log("purgeUser " + req.signedCookies.name);
+  res.clearCookie(req.signedCookies.name).end('purgeUser');
+  console.log("PURGE TOKEN END -----------------------");
 });
 
 app.get('/publish', (request, response) => {
