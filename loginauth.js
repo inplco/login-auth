@@ -18,7 +18,7 @@ function writeLog() {
   var log_file = fs.createWriteStream('./logs/debug.log', {flags : 'w'});
   var log_stdout = process.stdout;
 
-  console.log = function(d) { //
+  console.log = function(d) {
     log_file.write(util.format(d) + '\n');
     log_stdout.write(util.format(d) + '\n');
   };
@@ -110,7 +110,7 @@ app.get('/authenticate', (req, res, next) => {
   };
 
   fs.readFile('./hasvoted.json', 'utf8', function read(err, data){
-    console.log("USER CALL BEGIN -----------------------");
+    console.log("USER CALL BEGIN ------------------------");
     console.log("authenticating user " + req.query.password);
     if (err){
       console.log('cannot read purged list');
